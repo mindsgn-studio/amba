@@ -1,0 +1,12 @@
+appId: mindsgn.studio.amba
+---
+- launchApp
+- assertVisible: "Amba"
+- tapOn: "Continue"
+- tapOn: "Continue"
+- tapOn: "Start Learning"
+- tapOn: "Enable Microphone"
+- tapOn: "Morning at the Market"
+- tapOn: "Start Reading"
+- tapOn: "Stop Reading"
+- assertVisible: "Accuracy"
