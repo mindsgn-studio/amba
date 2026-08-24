@@ -1,0 +1,20 @@
+{
+  "chunk_id": "chunk_001",
+  "text": "The quick brown fox jumps over the lazy dog. This is a test audiobook.",
+  "words": [
+    { "index": 0, "text": "The", "start": 0.0, "end": 0.2 },
+    { "index": 1, "text": "quick", "start": 0.21, "end": 0.5 },
+    { "index": 2, "text": "brown", "start": 0.51, "end": 0.8 },
+    { "index": 3, "text": "fox", "start": 0.81, "end": 1.1 },
+    { "index": 4, "text": "jumps", "start": 1.11, "end": 1.45 },
+    { "index": 5, "text": "over", "start": 1.5, "end": 1.75 },
+    { "index": 6, "text": "the", "start": 1.76, "end": 1.95 },
+    { "index": 7, "text": "lazy", "start": 1.96, "end": 2.25 },
+    { "index": 8, "text": "dog.", "start": 2.26, "end": 2.6 },
+    { "index": 9, "text": "This", "start": 2.7, "end": 2.95 },
+    { "index": 10, "text": "is", "start": 2.96, "end": 3.1 },
+    { "index": 11, "text": "a", "start": 3.11, "end": 3.18 },
+    { "index": 12, "text": "test", "start": 3.19, "end": 3.4 },
+    { "index": 13, "text": "audiobook.", "start": 3.41, "end": 3.9 }
+  ]
+}

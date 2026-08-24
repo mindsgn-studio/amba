@@ -1,0 +1,23 @@
+# 02 — Uploading a text file starts audiobook generation.
+#
+# Prerequisite: the sample file is on the device:
+#   adb push tests/e2e-assets/sample-book.txt /sdcard/Download/
+#
+# The Android document picker UI varies by device; the selectors below
+# target the common AOSP DocumentsUI. Adjust if your device differs.
+appId: com.readalong.app
+---
+- launchApp
+
+- tapOn:
+    id: "upload-book-button"
+
+# System document picker: open the Downloads drawer, then pick the file.
+- tapOn: "Show roots"
+- tapOn: "Downloads"
+- tapOn: "sample-book.txt"
+
+# Upload triggers a job; the app navigates to the processing screen.
+- assertVisible:
+    id: "processing-percent"
+- assertVisible: "Generating audiobook"

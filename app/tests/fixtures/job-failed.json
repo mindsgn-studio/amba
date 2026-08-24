@@ -1,0 +1,11 @@
+{
+  "id": "job123",
+  "type": "generate_book",
+  "book_id": "abc123",
+  "status": "failed",
+  "progress": 42,
+  "error": "TTS generation failed for chunk 17",
+  "created_at": "2026-08-23T20:15:01Z",
+  "started_at": "2026-08-23T20:15:02Z",
+  "completed_at": null
+}

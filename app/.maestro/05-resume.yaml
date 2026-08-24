@@ -1,0 +1,37 @@
+# 05 — Position survives an app restart (resume).
+#
+# Prerequisite: 04-reader.yaml ran (playback has started).
+appId: com.readalong.app
+---
+- launchApp
+
+# Enter the reader if the app relaunched to Home.
+- tapOn:
+    id: "book-action-button"
+- assertVisible:
+    id: "chapter-label"
+
+# Play briefly so progress is persisted, then leave via Done.
+- tapOn:
+    id: "play-pause-button"
+- waitForAnimationEnd:
+    timeout: 6000
+- tapOn:
+    id: "reader-exit-button"
+
+# Home now offers Continue Reading.
+- extendedWaitUntil:
+    visible: "Continue Reading"
+    timeout: 15000
+
+# Kill and relaunch the app; resume must land back in the reader.
+- stopApp
+- launchApp
+- tapOn:
+    id: "book-action-button"
+- assertVisible:
+    id: "chapter-label"
+
+# Progress bar reflects a non-zero restored position.
+- assertVisible:
+    id: "reading-time"

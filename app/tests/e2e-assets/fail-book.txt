@@ -1,0 +1,2 @@
+This file is used to verify the failure path in end-to-end tests.
+The mock backend intentionally fails every job whose title starts with "fail".

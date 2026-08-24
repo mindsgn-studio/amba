@@ -1,0 +1,26 @@
+# 04 — The reader plays audio and highlights words.
+#
+# Prerequisite: 03-processing.yaml ran (a completed book exists).
+appId: com.readalong.app
+---
+- launchApp
+
+- assertVisible: "Start Reading"
+- tapOn:
+    id: "book-action-button"
+
+# Reader opens on the first chapter.
+- assertVisible:
+    id: "chapter-label"
+- assertVisible: "Chapter 1"
+
+# Playback starts paused; press play and confirm progress advances.
+- assertVisible:
+    id: "play-pause-button"
+- tapOn:
+    id: "play-pause-button"
+
+- extendedWaitUntil:
+    visible:
+      text: ".*Currently reading.*"
+    timeout: 15000

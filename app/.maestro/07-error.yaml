@@ -1,0 +1,36 @@
+# 07 — Failed jobs surface a clear error with recovery.
+#
+# Prerequisite: the failure asset is on the device and NO book exists
+# (delete the app data first: adb shell pm clear com.readalong.app):
+#   adb push tests/e2e-assets/fail-book.txt /sdcard/Download/
+#   node tools/mock-backend.mjs   (books titled fail* always fail)
+appId: com.readalong.app
+---
+- launchApp:
+    clearState: true
+
+- tapOn:
+    id: "upload-book-button"
+
+- tapOn: "Show roots"
+- tapOn: "Downloads"
+- tapOn: "fail-book.txt"
+
+# The job fails ~3s after creation; Home shows the error state.
+- extendedWaitUntil:
+    visible:
+      id: "error-state"
+    timeout: 60000
+- assertVisible: "Intentional E2E failure"
+
+# The user can recover by deleting the failed book.
+- assertVisible:
+    id: "delete-book-button"
+- tapOn:
+    id: "delete-book-button"
+
+# After deletion the app is back to the empty state.
+- extendedWaitUntil:
+    visible:
+      id: "upload-book-button"
+    timeout: 30000

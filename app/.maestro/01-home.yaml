@@ -1,0 +1,17 @@
+# 01 — Home screen shows the empty state.
+#
+# Prerequisite: a fresh app install (no book stored yet).
+#   adb install app-debug.apk        (dev build, appId com.readalong.app)
+#   adb reverse tcp:8000 tcp:8000    (so localhost:8000 reaches the host)
+#   node tools/mock-backend.mjs      (on the host)
+#
+# Run: maestro test .maestro/01-home.yaml
+appId: com.readalong.app
+---
+- launchApp:
+    clearState: true
+
+- assertVisible: "No book yet"
+- assertVisible:
+    id: "upload-book-button"
+- assertVisible: "Upload Book"
