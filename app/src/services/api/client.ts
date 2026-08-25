@@ -50,13 +50,13 @@ export async function apiRequest<T>(
       method: options.method ?? 'GET',
       headers: options.headers,
       body: options.body,
-      signal: AbortSignal.timeout(env.requestTimeoutMs),
+      // signal: AbortSignal.timeout(env.requestTimeoutMs),
     });
   } catch (error) {
     if (error instanceof ApiError) {
       throw error;
     }
-    throw new ApiError(0, `Unable to connect to server (${url})`);
+    throw new ApiError(0, `Unable to connect to server (${url}): ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const text = await response.text();

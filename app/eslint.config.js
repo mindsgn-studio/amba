@@ -1,3 +1,9 @@
-import expoConfig from 'eslint-config-expo/flat.js';
+const { defineConfig } = require("eslint/config");
+const expoConfig = require("eslint-config-expo/flat");
 
-export default expoConfig;
+module.exports = defineConfig([
+  expoConfig,
+  {
+    ignores: ["dist/*"],
+  },
+]);

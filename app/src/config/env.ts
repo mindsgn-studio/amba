@@ -1,4 +1,4 @@
-const DEFAULT_API_URL = 'http://localhost:8000';
+  const DEFAULT_API_URL = 'http://localhost:8000';
 
 function stripTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '');

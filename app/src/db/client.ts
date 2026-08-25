@@ -1,53 +1,68 @@
-import { drizzle, type ExpoSQLiteDatabase } from 'drizzle-orm/expo-sqlite';
-import { migrate } from 'drizzle-orm/expo-sqlite/migrator';
-import * as SQLite from 'expo-sqlite';
-import migrationBundle from './migrations/bundle';
-import * as schema from './schema';
+import { drizzle, type BetterSQLite3Database } from "drizzle-orm/expo-sqlite";
+import { type SQLiteDatabase, openDatabaseSync } from "expo-sqlite";
+import { migrate } from "drizzle-orm/expo-sqlite/migrator";
+import * as schema from "./schema";
+import migrations from "./migrations/migrations";
 
-export type AppDatabase = ExpoSQLiteDatabase<typeof schema>;
+export const DATABASE_NAME = "amba.db";
+
+let _sqlite: SQLiteDatabase | null = null;
+let _db: BetterSQLite3Database<typeof schema> | null = null;
+
+function openDb(name: string): void {
+  _sqlite = openDatabaseSync(name);
+  _sqlite.execSync("PRAGMA foreign_keys = ON;");
+  _db = drizzle(_sqlite, { schema });
+}
 
 /**
- * Database file name. Tests may override it to point at a temporary
- * file-backed database (EXPO_PUBLIC_DB_NAME); production always uses the
- * default application database.
+ * Open (or reopen) the SQLite database and run Drizzle migrations.
+ * Safe to call multiple times — the previous connection is closed first.
  */
-function databaseName(): string {
-  return process.env.EXPO_PUBLIC_DB_NAME ?? 'readalong.db';
+export async function initDatabase(): Promise<void> {
+  closeDatabase();
+  openDb(process.env.EXPO_PUBLIC_DB_NAME ?? DATABASE_NAME);
+  await migrate(_db!, migrations);
 }
 
-let db: AppDatabase | null = null;
-
-/**
- * Opens the SQLite database and applies Drizzle migrations.
- *
- * The database is never reset during normal startup: books, jobs and
- * reading progress must survive app restarts and device restarts.
- */
-export async function initDatabase(): Promise<AppDatabase> {
-  if (db) {
-    return db;
-  }
-  const sqlite = SQLite.openDatabaseSync(databaseName());
-  const database = drizzle(sqlite, { schema });
-  await migrate(database, migrationBundle);
-  db = database;
-  return database;
-}
-
-/** Returns the shared database instance; throws when not initialized. */
-export function getDb(): AppDatabase {
-  if (!db) {
-    throw new Error('Database not initialized. Call initDatabase() first.');
-  }
-  return db;
-}
-
-/** Test-only helper to swap the database instance between tests. */
-export function setDbForTesting(testDb: AppDatabase): void {
-  db = testDb;
-}
-
-/** Closes the database if open (used by tests). */
+/** Close the current database connection. Safe to call when not initialised. */
 export function closeDatabase(): void {
-  db = null;
+  if (_sqlite) {
+    try {
+      _sqlite.closeSync();
+    } catch {
+      // already closed — ignore
+    }
+    _sqlite = null;
+    _db = null;
+  }
 }
+
+/** Return the active Drizzle database handle. Throws if `initDatabase` was not called. */
+export function getDb(): BetterSQLite3Database<typeof schema> {
+  if (!_db) {
+    throw new Error("Database not initialised — call initDatabase() first");
+  }
+  return _db;
+}
+
+// Open eagerly so _layout.tsx can call useMigrations on the handle
+// before any hook has called initDatabase().
+openDb(process.env.EXPO_PUBLIC_DB_NAME ?? DATABASE_NAME);
+
+/*
+remove initDatabase, closeDatabase, and getDb from client.ts and from tests.  client.ts code should be
+
+remove initDatabase, closeDatabase, and getDb from client.ts and from tests.  client.ts code should be import { drizzle } from "drizzle-orm/expo-sqlite";
+import { openDatabaseSync } from "expo-sqlite";
+import * as schema from "./schema";
+
+export const DATABASE_NAME = "amafa.db";
+
+export const expo_sqlite = openDatabaseSync(DATABASE_NAME);
+// Ensure ON DELETE CASCADE on components works (off by default in SQLite).
+expo_sqlite.execSync("PRAGMA foreign_keys = ON;");
+export const db = drizzle(expo_sqlite, { schema });
+
+ now rewrite tests and @app/src/db/repositories/, and client.ts
+*/

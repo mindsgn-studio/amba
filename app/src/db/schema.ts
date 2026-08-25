@@ -7,11 +7,6 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 
-/**
- * Local mirror of the backend book. The MVP supports exactly one book at a
- * time; this is enforced at the repository/service level on top of the
- * `books` table.
- */
 export const books = sqliteTable('books', {
   id: text('id').primaryKey(),
   title: text('title').notNull(),

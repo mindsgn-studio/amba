@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { ScrollView, StyleSheet } from 'react-native';
+import { ScrollView, StyleSheet, Dimensions } from 'react-native';
 import { BookCard } from '@/components/books/BookCard';
 import { UploadCard } from '@/components/books/UploadCard';
 import { ProcessingProgress } from '@/components/processing/ProcessingProgress';
@@ -55,6 +55,7 @@ export default function HomeScreen(): React.JSX.Element {
         router.push('/processing');
       }
     } catch (error) {
+      console.log(error)
       setActionError(
         error instanceof Error
           ? `Upload failed: ${error.message}`
@@ -80,10 +81,6 @@ export default function HomeScreen(): React.JSX.Element {
       setDeleting(false);
     }
   }, [removeBook]);
-
-  if (!appReady) {
-    return <ScrollView contentContainerStyle={styles.container} />;
-  }
 
   let content: React.ReactNode;
   switch (homeState) {
@@ -165,7 +162,9 @@ export default function HomeScreen(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   scroll: {
-    flex: 1,
+    height: Dimensions.get('window').height,
+    width: Dimensions.get('window').width,
+    backgroundColor: "#000"
   },
   container: {
     alignItems: 'center',

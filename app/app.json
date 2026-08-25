@@ -1,22 +1,23 @@
 {
   "expo": {
-    "name": "Read Along",
-    "slug": "read-along",
+    "name": "AMBA",
+    "slug": "amba",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "readalong",
+    "scheme": "amba",
+    "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "assetBundlePatterns": ["assets/*"],
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "infoPlist": {
         "UIBackgroundModes": ["audio"]
       },
-      "bundleIdentifier": "com.readalong.app"
+      "bundleIdentifier": "mindsgn.studio.test"
     },
     "android": {
-      "package": "com.readalong.app"
+      "package": "mindsgn.studio.test"
     },
     "plugins": [
       "expo-router",

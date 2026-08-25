@@ -83,7 +83,7 @@ export function updateBookStatus(
 
 /** Deletes the local book row; chapters/chunks/jobs/progress cascade. */
 export function deleteLocalBook(bookId: string): void {
-  getDb().delete(books).where(eq(books.id, bookId)).run();
+ getDb().delete(books).where(eq(books.id, bookId)).run();
 }
 
 // ---------------------------------------------------------------------------
