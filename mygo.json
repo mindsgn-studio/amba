@@ -1,0 +1,8 @@
+{
+  "name": "Amba",
+  "slug": "amba",
+  "identifier": "phumzile.studio.amba",
+  "version": "0.0.1",
+  "copyright": "© 2026 Phumzile Studio",
+  "out": "build"
+}
