@@ -25,15 +25,52 @@ type Metadata struct {
 	CoverMediaType string
 }
 
-// Chapter is one document of the reading order.
+// TOCEntry is one item of the book's table of contents.
+type TOCEntry struct {
+	Title string
+	Href  string
+	Level int
+}
+
+// Chapter is one document of the reading order. Its text is preserved for
+// rendering; Normalized and the word metadata are only used for matching.
 type Chapter struct {
+	Index      int
+	Href       string
 	Title      string
+	Text       string
+	Normalized string
 	Paragraphs []Paragraph
+	Sentences  []Sentence
 }
 
 // Paragraph is a run of words as printed, with punctuation kept.
 type Paragraph struct {
-	Words []string
+	Index      int
+	Text       string
+	Normalized string
+	Words      []string
+	Sentences  []Sentence
+}
+
+// Sentence is a sentence as printed, with its character offsets in its
+// paragraph and the words that make it up.
+type Sentence struct {
+	Index      int
+	Text       string
+	Normalized string
+	Start      int
+	End        int
+	Words      []Word
+}
+
+// Word is one printed word with its original text, matching form and byte
+// offsets in its paragraph.
+type Word struct {
+	Text       string
+	Normalized string
+	Start      int
+	End        int
 }
 
 // Document is an opened EPUB. Its chapters are parsed on first use.
@@ -41,14 +78,20 @@ type Document struct {
 	Path     string
 	Metadata Metadata
 
-	files    *zip.Reader
-	opfDir   string
-	manifest map[string]manifestItem
-	spine    []spineItem
+	files         *zip.Reader
+	opfDir        string
+	manifest      map[string]manifestItem
+	manifestOrder []string
+	spine         []spineItem
+	tocID         string
 
 	once        sync.Once
 	chapters    []Chapter
 	chaptersErr error
+
+	tocOnce sync.Once
+	toc     []TOCEntry
+	tocErr  error
 }
 
 type manifestItem struct {
@@ -141,7 +184,9 @@ func Open(filename string) (*Document, error) {
 			MediaType:  item.MediaType,
 			Properties: item.Properties,
 		}
+		document.manifestOrder = append(document.manifestOrder, item.ID)
 	}
+	document.tocID = strings.TrimSpace(pkg.Spine.Toc)
 	for _, item := range pkg.Spine.ItemRefs {
 		document.spine = append(document.spine, spineItem{IDRef: item.IDRef, Linear: item.Linear})
 	}
@@ -185,8 +230,14 @@ func (d *Document) Chapters() ([]Chapter, error) {
 			if len(chapter.Paragraphs) == 0 {
 				continue
 			}
+			chapter.Index = len(d.chapters)
+			chapter.Href = resolveHref(d.opfDir, item.Href)
 			if chapter.Title == "" {
-				chapter.Title = fmt.Sprintf("Chapter %d", len(d.chapters)+1)
+				if title := d.tocTitle(chapter.Href); title != "" {
+					chapter.Title = title
+				} else {
+					chapter.Title = fmt.Sprintf("Chapter %d", len(d.chapters)+1)
+				}
 			}
 			d.chapters = append(d.chapters, chapter)
 		}
@@ -325,6 +376,7 @@ type packageXML struct {
 		} `xml:"item"`
 	} `xml:"manifest"`
 	Spine struct {
+		Toc      string `xml:"toc,attr"`
 		ItemRefs []struct {
 			IDRef  string `xml:"idref,attr"`
 			Linear string `xml:"linear,attr"`

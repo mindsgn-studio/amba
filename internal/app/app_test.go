@@ -419,3 +419,116 @@ func writeTestEPUB(t *testing.T) string {
 	}
 	return filename
 }
+
+func TestContentForCachesAlignmentAndInvalidatesOnChanges(t *testing.T) {
+	application := newTestApp(t)
+	epubPath := writeTestEPUB(t)
+	book := library.Book{ID: "book", EPUBPath: epubPath}
+	transcript := &transcribe.Transcript{
+		Words: []transcribe.Word{
+			{Text: "The", Start: 0, End: 400 * time.Millisecond},
+			{Text: "cat", Start: 500 * time.Millisecond, End: 900 * time.Millisecond},
+			{Text: "sat.", Start: time.Second, End: 1400 * time.Millisecond},
+		},
+		Duration: 1500 * time.Millisecond,
+	}
+	report := func(transcribe.Progress) {}
+
+	content := application.contentFor(context.Background(), book, transcript, report)
+	if content == nil || !content.Synced {
+		t.Fatalf("contentFor() = %+v, want synced content", content)
+	}
+
+	cachePath := application.cache.File("books", book.ID, "alignment.json")
+	var first readalong.Alignment
+	if err := application.cache.ReadJSON(cachePath, &first); err != nil {
+		t.Fatalf("alignment was not cached: %v", err)
+	}
+	if first.Key == "" || first.Version != readalong.AlignmentVersion {
+		t.Errorf("cached alignment = %+v, want a key and version", first)
+	}
+	if len(first.Matches) == 0 {
+		t.Error("cached alignment has no word matches")
+	}
+
+	// The same inputs use the cache and keep the same key.
+	content = application.contentFor(context.Background(), book, transcript, report)
+	if content == nil || !content.Synced {
+		t.Fatal("contentFor() failed on the cached path")
+	}
+	var again readalong.Alignment
+	if err := application.cache.ReadJSON(cachePath, &again); err != nil {
+		t.Fatal(err)
+	}
+	if again.Key != first.Key {
+		t.Errorf("cache key changed for unchanged inputs: %q then %q", first.Key, again.Key)
+	}
+
+	// A changed transcript invalidates the alignment.
+	changed := &transcribe.Transcript{
+		Words:    append([]transcribe.Word(nil), transcript.Words...),
+		Duration: transcript.Duration,
+	}
+	changed.Words[1].Text = "dog"
+	_ = application.contentFor(context.Background(), book, changed, report)
+	var second readalong.Alignment
+	if err := application.cache.ReadJSON(cachePath, &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Key == first.Key {
+		t.Error("changed transcript did not invalidate the alignment cache")
+	}
+}
+
+func TestAttachEPUBPersistsImport(t *testing.T) {
+	application := newTestApp(t)
+	book := library.Book{ID: "book", Title: "Book"}
+	application.books = []library.Book{book}
+	application.reader.bookID = "other"
+
+	epubPath := writeTestEPUB(t)
+	if err := application.attachEPUB(book.ID, epubPath); err != nil {
+		t.Fatal(err)
+	}
+	if application.books[0].EPUBPath != epubPath {
+		t.Errorf("book EPUBPath = %q, want %q", application.books[0].EPUBPath, epubPath)
+	}
+	if application.books[0].Title != "Test Book" {
+		t.Errorf("book title = %q, want the EPUB title", application.books[0].Title)
+	}
+
+	// A fresh scan reattaches the imported EPUB from the cache.
+	scanned := []library.Book{{ID: book.ID, Title: "Book"}}
+	scanned = application.applyImports(scanned)
+	if scanned[0].EPUBPath != epubPath {
+		t.Errorf("applyImports() EPUBPath = %q, want %q", scanned[0].EPUBPath, epubPath)
+	}
+}
+
+func TestContentForFallsBackToTranscriptWhenEPUBDoesNotMatch(t *testing.T) {
+	application := newTestApp(t)
+	book := library.Book{ID: "book", EPUBPath: writeTestEPUB(t)}
+	transcript := &transcribe.Transcript{
+		Words: []transcribe.Word{
+			{Text: "alpha", Start: 0, End: 400 * time.Millisecond},
+			{Text: "bravo", Start: 500 * time.Millisecond, End: 900 * time.Millisecond},
+			{Text: "charlie", Start: time.Second, End: 1400 * time.Millisecond},
+			{Text: "delta", Start: 1500 * time.Millisecond, End: 1900 * time.Millisecond},
+			{Text: "echo", Start: 2 * time.Second, End: 2400 * time.Millisecond},
+		},
+		Duration: 2500 * time.Millisecond,
+	}
+
+	content := application.contentFor(context.Background(), book, transcript, func(transcribe.Progress) {})
+	if content == nil {
+		t.Fatal("contentFor() returned nil")
+	}
+	if content.Synced {
+		t.Fatalf("unrelated EPUB was marked synced: %v", content.Diagnostics)
+	}
+	for _, chapter := range content.Chapters {
+		if chapter.Source != "transcript" {
+			t.Errorf("chapter source = %q, want transcript fallback", chapter.Source)
+		}
+	}
+}

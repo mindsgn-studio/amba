@@ -206,3 +206,172 @@ func TestResolveHref(t *testing.T) {
 		}
 	}
 }
+
+func TestChaptersPreserveTextSentencesAndOffsets(t *testing.T) {
+	document, err := Open(testEPUB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	chapters, err := document.Chapters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := chapters[0]
+
+	if first.Text != "Hello world.\n\nSecond & last." {
+		t.Errorf("chapter text = %q, want the printed paragraphs", first.Text)
+	}
+	if first.Normalized != "hello world second and last" {
+		t.Errorf("chapter normalized text = %q", first.Normalized)
+	}
+	if len(first.Sentences) != 2 {
+		t.Fatalf("chapter has %d sentences, want 2", len(first.Sentences))
+	}
+
+	paragraph := first.Paragraphs[0]
+	if paragraph.Text != "Hello world." || paragraph.Normalized != "hello world" {
+		t.Errorf("paragraph = %+v, want printed and normalized text", paragraph)
+	}
+	if len(paragraph.Sentences) != 1 {
+		t.Fatalf("paragraph has %d sentences, want 1", len(paragraph.Sentences))
+	}
+	sentence := paragraph.Sentences[0]
+	if sentence.Text != "Hello world." || sentence.Start != 0 || sentence.End != len("Hello world.") {
+		t.Errorf("sentence = %+v, want the whole paragraph at its offsets", sentence)
+	}
+	if len(sentence.Words) != 2 {
+		t.Fatalf("sentence has %d words, want 2", len(sentence.Words))
+	}
+	for _, word := range sentence.Words {
+		if got := paragraph.Text[word.Start:word.End]; got != word.Text {
+			t.Errorf("word %+v offsets select %q", word, got)
+		}
+	}
+	if sentence.Words[1].Normalized != "world" {
+		t.Errorf("normalized word = %q, want world", sentence.Words[1].Normalized)
+	}
+}
+
+func TestTableOfContentsFromNavigationDocument(t *testing.T) {
+	filename := writeEPUB(t,
+		entry{"META-INF/container.xml", []byte(`<?xml version="1.0"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles>
+</container>`)},
+		entry{"OEBPS/content.opf", []byte(`<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Contents Test</dc:title></metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ch1" href="text/one.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="text/two.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="ch1"/><itemref idref="ch2"/></spine>
+</package>`)},
+		entry{"OEBPS/nav.xhtml", []byte(`<html><body>
+<nav epub:type="landmarks"><ol><li><a href="text/one.xhtml">Start</a></li></ol></nav>
+<nav epub:type="toc"><ol>
+  <li><a href="text/one.xhtml">First Part</a></li>
+  <li><a href="text/two.xhtml#start">Second Part</a></li>
+</ol></nav></body></html>`)},
+		entry{"OEBPS/text/one.xhtml", []byte(`<html><body><p>One.</p></body></html>`)},
+		entry{"OEBPS/text/two.xhtml", []byte(`<html><body><p>Two.</p></body></html>`)},
+	)
+
+	document, err := Open(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := document.TableOfContents()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("TableOfContents() = %+v, want 2 entries", entries)
+	}
+	if entries[0].Title != "First Part" || entries[0].Href != "OEBPS/text/one.xhtml" {
+		t.Errorf("first entry = %+v", entries[0])
+	}
+	if entries[1].Href != "OEBPS/text/two.xhtml" {
+		t.Errorf("second entry = %+v, want the fragment removed", entries[1])
+	}
+
+	chapters, err := document.Chapters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chapters[0].Title != "First Part" || chapters[1].Title != "Second Part" {
+		t.Errorf("chapter titles = %q, %q, want the table of contents", chapters[0].Title, chapters[1].Title)
+	}
+}
+
+func TestOpenRejectsInvalidArchive(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "broken.epub")
+	if err := os.WriteFile(filename, []byte("this is not a zip archive"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(filename); err == nil {
+		t.Fatal("Open() accepted a non-ZIP file")
+	}
+}
+
+func TestTableOfContentsFromNCX(t *testing.T) {
+	filename := writeEPUB(t,
+		entry{"META-INF/container.xml", []byte(`<?xml version="1.0"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles>
+</container>`)},
+		entry{"OEBPS/content.opf", []byte(`<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>NCX Test</dc:title></metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="ch1" href="text/one.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx"><itemref idref="ch1"/></spine>
+</package>`)},
+		entry{"OEBPS/toc.ncx", []byte(`<?xml version="1.0"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+  <navMap>
+    <navPoint>
+      <navLabel><text>Opening</text></navLabel>
+      <content src="text/one.xhtml"/>
+      <navPoint>
+        <navLabel><text>Subsection</text></navLabel>
+        <content src="text/one.xhtml#sub"/>
+      </navPoint>
+    </navPoint>
+  </navMap>
+</ncx>`)},
+		entry{"OEBPS/text/one.xhtml", []byte(`<html><body><p>One.</p></body></html>`)},
+	)
+
+	document, err := Open(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := document.TableOfContents()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("TableOfContents() = %+v, want 2 entries", entries)
+	}
+	if entries[0].Title != "Opening" || entries[0].Level != 0 {
+		t.Errorf("first entry = %+v", entries[0])
+	}
+	if entries[1].Title != "Subsection" || entries[1].Level != 1 {
+		t.Errorf("nested entry = %+v", entries[1])
+	}
+	if entries[1].Href != "OEBPS/text/one.xhtml" {
+		t.Errorf("nested href = %q, want the fragment removed", entries[1].Href)
+	}
+
+	chapters, err := document.Chapters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chapters[0].Title != "Opening" {
+		t.Errorf("chapter title = %q, want the NCX label", chapters[0].Title)
+	}
+}

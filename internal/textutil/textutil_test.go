@@ -55,3 +55,41 @@ func TestIsWord(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeUnicodeAndTypography(t *testing.T) {
+	tests := []struct {
+		word string
+		want string
+	}{
+		{"Caf\u00e9", "caf\u00e9"},
+		{"\u201cQuoted\u201d", "quoted"},
+		{"well\u2011known", "wellknown"},
+		{"rock\u00a0star", "rock star"},
+		{"can\u02bct", "can't"},
+	}
+	for _, test := range tests {
+		if got := Normalize(test.word); got != test.want {
+			t.Errorf("Normalize(%q) = %q, want %q", test.word, got, test.want)
+		}
+	}
+}
+
+func TestLevenshtein(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want int
+	}{
+		{"", "", 0},
+		{"", "abc", 3},
+		{"abc", "", 3},
+		{"cat", "cat", 0},
+		{"cat", "cot", 1},
+		{"kitten", "sitting", 3},
+		{"caf\u00e9", "cafe", 1},
+	}
+	for _, test := range tests {
+		if got := Levenshtein(test.a, test.b); got != test.want {
+			t.Errorf("Levenshtein(%q, %q) = %d, want %d", test.a, test.b, got, test.want)
+		}
+	}
+}

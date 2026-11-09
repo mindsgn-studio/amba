@@ -42,7 +42,8 @@ audiobooks/
 ```
 
 Files in a folder are one book, in natural order (`2` before `10`). An EPUB
-beside them supplies the title, author, cover and text. Playable audio formats
+beside them supplies the title, author, cover and text. An EPUB elsewhere can
+also be imported from the reader with **Import EPUB**. Playable audio formats
 are the ones mygo decodes: **MP3, OGG Vorbis and WAV**. Other containers
 (M4A, M4B, MP4, FLAC) are not shown, because they would fail to play.
 
@@ -80,26 +81,35 @@ what the EPUB alignment needs.
 
 When an EPUB exists, `internal/align` matches the book's words to the narration:
 
-- unique three-word anchors that occur once in both sequences define the
-  correspondence;
-- the short segments between anchors are aligned with dynamic programming (or
-  a greedy scan for very large gaps, such as front matter the narrator skips).
+- exact anchors of 2 to 5 words that occur once in both sequences define the
+  correspondence, and fuzzy anchors recover passages with small Whisper errors;
+- generic and frequently repeated phrases are ignored;
+- the short segments between anchors are aligned with dynamic programming using
+  word similarity (or a bounded greedy scan for very large gaps, such as front
+  matter the narrator skips);
+- the result is monotonic, so reading order is preserved.
 
-The reader only trusts the alignment when at least 25% of the book's words
-match (`readalong.MinSyncConfidence`). A lower score usually means the EPUB is
-a different edition, so the reader falls back to the transcript, laid out in
-parts with paragraphs split at pauses.
+Alignment is evaluated chapter by chapter. A chapter is accepted only when its
+confidence, ebook coverage and quality are each at least 80% by default; these
+thresholds are configurable. Rejected chapters fall back to the narration's
+transcript between the surrounding accepted chapters, so one different edition
+chapter does not make the whole book unusable. If no chapter is accepted, the
+reader uses the transcript exactly as it did before EPUB support.
 
-`internal/readalong` then maps narration words to displayed words, filling
-forward across passages the narrator reads but the book does not show. The
-reader uses that map to highlight the active word and to keep the chapter and
-paragraph in view.
+`internal/readalong` maps narration words to displayed words, filling forward
+across passages the narrator reads but the book does not show. The reader uses
+that map to highlight the active word and to keep the chapter and paragraph in
+view. Ebook words without a reliable match never receive an invented timestamp.
+
+See [`docs/alignment.md`](docs/alignment.md) for the algorithm, confidence
+formula and limitations.
 
 ## Where things are stored
 
-- `os.UserCacheDir()/Amba` — transcripts (`books/<id>/transcript.json`) and
-  listening progress (`progress/<id>.json`). On macOS that is
-  `~/Library/Caches/Amba`.
+- `os.UserCacheDir()/Amba` — transcripts (`books/<id>/transcript.json`),
+  alignment results (`books/<id>/alignment.json`), imported EPUB paths
+  (`books/<id>/epub-import.json`) and listening progress
+  (`progress/<id>.json`). On macOS that is `~/Library/Caches/Amba`.
 - `models/sherpa-onnx-whisper-tiny.en` — the speech model, installed from the
   official sherpa-onnx release when it is not present.
 - `audiobooks/`, `models/` and `.mygo/` are ignored by git; media and models
@@ -114,12 +124,12 @@ and starts it. Everything else lives in `internal/`:
 | --- | --- |
 | `app` | Screens, routing, background preparation, reader state and progress saving. Playback is an interface, so the reader can be tested without audio hardware. |
 | `library` | Finds books on disk, reads EPUB metadata and stores per-book progress. |
-| `epub` | Reads EPUB metadata, cover, reading order and plain text with the standard library and `x/net/html`. |
+| `epub` | Reads EPUB metadata, cover, table of contents, reading order, sentences, words, offsets and plain text with the standard library and `x/net/html`. |
 | `transcribe` | Whisper transcription, model installation, audio conversion and the transcript cache. |
 | `media` | Audio durations via `ffprobe`. |
 | `player` | Plays a list of files as one timeline, with position, seeking, speed and track advance. |
-| `readalong` | Builds the timed, displayable content from an EPUB or a transcript. |
-| `align` | Word-sequence alignment with anchors and dynamic programming. |
+| `readalong` | Builds timed content, evaluates chapter acceptance, persists alignment results and falls back to the transcript. |
+| `align` | Fuzzy monotonic alignment with multi-size anchors, word similarity, confidence scoring and local alignment. |
 | `textutil` | Word normalisation shared by alignment and display. |
 | `store` | Atomic JSON cache files. |
 
@@ -136,7 +146,10 @@ alignment) runs off the main thread, publishing results through
   pauses rather than measured, so a highlighted word can lead or lag the voice
   slightly. A whisper model exported with attention outputs is used verbatim
   when it is installed.
-- EPUB sync needs the same edition as the recording. Images, tables and
-  footnotes are reduced to reading-order text.
+- EPUB sync tolerates minor transcription errors and small edition differences.
+  Heavily rewritten passages may be rejected chapter by chapter and fall back
+  to the transcript. Images, tables and footnotes are reduced to reading-order
+  text.
+- Alignment is lexical: paraphrases that share no words cannot be matched.
 - Only the audio formats mygo can decode are playable; the library hides the
   rest rather than showing a book that cannot be opened.

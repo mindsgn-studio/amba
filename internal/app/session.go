@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/mindsgn-studio/amba/internal/align"
 	"github.com/mindsgn-studio/amba/internal/epub"
 	"github.com/mindsgn-studio/amba/internal/library"
 	"github.com/mindsgn-studio/amba/internal/player"
@@ -74,6 +75,7 @@ type readerState struct {
 	lastParagraph int
 	lastSave      time.Time
 	playbackErr   error
+	importErr     error
 	list          ui.ListState
 }
 
@@ -155,8 +157,7 @@ func (a *App) buildSession(
 		return nil, err
 	}
 
-	report(transcribe.Progress{Stage: "Matching the book to the narration…", Fraction: 1})
-	content := contentFor(ctx, book, transcript)
+	content := a.contentFor(ctx, book, transcript, report)
 	if content == nil {
 		return nil, errors.New("could not read the audiobook")
 	}
@@ -194,7 +195,8 @@ func (a *App) buildSession(
 }
 
 // contentFor prefers the book's own text when it matches the narration, and
-// falls back to the transcript when it does not.
+// falls back to the transcript when it does not. It does not use the
+// alignment cache; the app uses App.contentFor, which does.
 func contentFor(ctx context.Context, book library.Book, transcript *transcribe.Transcript) *readalong.Content {
 	if book.EPUBPath != "" {
 		if err := ctx.Err(); err != nil {
@@ -211,6 +213,68 @@ func contentFor(ctx context.Context, book library.Book, transcript *transcribe.T
 		}
 	}
 	return readalong.FromTranscript(transcript)
+}
+
+// contentFor loads and aligns the EPUB, reusing a cached alignment when the
+// transcript, ebook text and configuration are unchanged. It never starts a
+// new transcription.
+func (a *App) contentFor(
+	ctx context.Context,
+	book library.Book,
+	transcript *transcribe.Transcript,
+	report func(transcribe.Progress),
+) *readalong.Content {
+	if book.EPUBPath == "" {
+		return readalong.FromTranscript(transcript)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil
+	}
+
+	report(transcribe.Progress{Stage: "Reading the EPUB…", Fraction: 0})
+	document, err := epub.Open(book.EPUBPath)
+	if err != nil {
+		return readalong.FromTranscript(transcript)
+	}
+	chapters, err := document.Chapters()
+	if err != nil {
+		return readalong.FromTranscript(transcript)
+	}
+
+	config := align.DefaultConfig()
+	key := readalong.AlignmentKey(chapters, transcript, config)
+	cachePath := a.cache.File("books", book.ID, "alignment.json")
+
+	var cached readalong.Alignment
+	if err := a.cache.ReadJSON(cachePath, &cached); err == nil &&
+		cached.Key == key && cached.Version == readalong.AlignmentVersion {
+		if content, buildErr := readalong.FromEPUBWithAlignment(chapters, transcript, &cached); buildErr == nil {
+			if !content.Synced {
+				return readalong.FromTranscript(transcript)
+			}
+			return content
+		}
+	}
+
+	report(transcribe.Progress{Stage: "Matching the book to the narration…", Fraction: 0})
+	alignment, err := readalong.AlignBook(ctx, chapters, transcript, config, func(fraction float64) {
+		report(transcribe.Progress{Stage: "Matching the book to the narration…", Fraction: fraction})
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return readalong.FromTranscript(transcript)
+	}
+
+	// A cache failure must not stop the book from opening.
+	_ = a.cache.WriteJSON(cachePath, alignment)
+
+	content, err := readalong.BuildContent(chapters, transcript, alignment)
+	if err != nil || !content.Synced {
+		return readalong.FromTranscript(transcript)
+	}
+	return content
 }
 
 // closeSession stops the reader and optionally saves its place.

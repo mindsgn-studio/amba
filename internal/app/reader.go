@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -59,6 +60,11 @@ func (a *App) readerHeader(c *ui.Context) {
 		})
 
 		if reader.status == readerReady && reader.session != nil {
+			if reader.session.book.EPUBPath == "" {
+				if ui.Button(c, "Import EPUB").Clicked() {
+					a.importEPUB(reader.book.ID)
+				}
+			}
 			if ui.Button(c, "Previous").Disabled(reader.chapter <= 0).Clicked() {
 				a.seekChapter(reader.chapter - 1)
 			}
@@ -75,15 +81,22 @@ func (a *App) readerSubtitle() string {
 	if reader.session == nil || len(reader.session.content.Chapters) == 0 {
 		return ""
 	}
-	chapter := reader.session.content.Chapters[reader.chapter].Title
-	if chapter == "" {
-		chapter = "Chapter"
+	content := reader.session.content
+	chapter := content.Chapters[reader.chapter]
+	title := chapter.Title
+	if title == "" {
+		title = "Chapter"
 	}
 	mode := "Transcript"
-	if reader.session.content.Synced {
-		mode = "Book text, synced"
+	switch {
+	case chapter.Source == "epub" && chapter.Accepted:
+		mode = fmt.Sprintf("Book text · %.0f%% aligned", chapter.Confidence*100)
+	case chapter.Rejected && content.Synced:
+		mode = "Transcript fallback · EPUB sync unavailable"
+	case content.Synced:
+		mode = fmt.Sprintf("Book text · %.0f%% aligned", content.Confidence*100)
 	}
-	return chapter + " · " + mode
+	return title + " · " + mode
 }
 
 func (a *App) readerLoadingView(c *ui.Context) {
@@ -177,7 +190,17 @@ func (a *App) readerBody(c *ui.Context) {
 	}
 
 	paragraphs := content.Chapters[reader.chapter].Paragraphs
+	theme := c.Theme()
 	ui.Column(c).Grow(1).AlignItems(ui.Center).Children(func() {
+		chapter := content.Chapters[reader.chapter]
+		if chapter.Rejected {
+			ui.Text(c, "EPUB synchronisation is unavailable for this chapter. Showing the audiobook transcript.").
+				FontSize(12).TextColor(theme.TextMuted).TextAlign(ui.Center).MaxWidth(620).Padding(24, 10)
+		}
+		if reader.importErr != nil {
+			ui.Text(c, reader.importErr.Error()).
+				FontSize(12).TextColor(theme.Danger).TextAlign(ui.Center).MaxWidth(620).Padding(24, 0)
+		}
 		ui.List(c, &reader.list, len(paragraphs), func(row int) {
 			a.paragraphRow(c, row, activeRef)
 		}).Grow(1).WidthPercent(100).MaxWidth(760).Padding(24, 0)
