@@ -48,12 +48,16 @@ const (
 )
 
 // session is one open book: its text, its narration and the listener's place
-// in both.
+// in both. The transcript is kept so an attached ebook can be removed without
+// transcribing the audiobook again, and the review is the attached ebook laid
+// out for the reader's drawer.
 type session struct {
-	book     library.Book
-	content  *readalong.Content
-	playback Playback
-	duration time.Duration
+	book       library.Book
+	content    *readalong.Content
+	transcript *transcribe.Transcript
+	review     *readalong.Review
+	playback   Playback
+	duration   time.Duration
 }
 
 // readerState is everything the reader screen shows.
@@ -76,7 +80,12 @@ type readerState struct {
 	lastSave      time.Time
 	playbackErr   error
 	importErr     error
+	removeErr     error
 	list          ui.ListState
+
+	drawerOpen    bool
+	reviewPage    int
+	confirmRemove bool
 }
 
 func newReaderState() readerState {
@@ -157,7 +166,7 @@ func (a *App) buildSession(
 		return nil, err
 	}
 
-	content := a.contentFor(ctx, book, transcript, report)
+	content, review := a.contentFor(ctx, book, transcript, report)
 	if content == nil {
 		return nil, errors.New("could not read the audiobook")
 	}
@@ -187,58 +196,69 @@ func (a *App) buildSession(
 	}
 
 	return &session{
-		book:     book,
-		content:  content,
-		playback: playback,
-		duration: duration,
+		book:       book,
+		content:    content,
+		transcript: transcript,
+		review:     review,
+		playback:   playback,
+		duration:   duration,
 	}, nil
 }
 
 // contentFor prefers the book's own text when it matches the narration, and
-// falls back to the transcript when it does not. It does not use the
-// alignment cache; the app uses App.contentFor, which does.
-func contentFor(ctx context.Context, book library.Book, transcript *transcribe.Transcript) *readalong.Content {
+// falls back to the transcript when it does not. The review is the attached
+// ebook laid out for inspection, and is returned even when the reader had to
+// fall back to the transcript, so the drawer can still show the printed book.
+// It does not use the alignment cache; the app uses App.contentFor, which does.
+func contentFor(ctx context.Context, book library.Book, transcript *transcribe.Transcript) (*readalong.Content, *readalong.Review) {
 	if book.EPUBPath != "" {
 		if err := ctx.Err(); err != nil {
-			return nil
+			return nil, nil
 		}
 		document, err := epub.Open(book.EPUBPath)
 		if err == nil {
 			chapters, chaptersErr := document.Chapters()
 			if chaptersErr == nil {
-				if content, alignErr := readalong.FromEPUB(chapters, transcript); alignErr == nil && content.Synced {
-					return content
+				content, alignErr := readalong.FromEPUB(chapters, transcript)
+				if alignErr == nil {
+					review := readalong.BuildReview(chapters, content.Alignment)
+					if content.Synced {
+						return content, review
+					}
+					return readalong.FromTranscript(transcript), review
 				}
+				return readalong.FromTranscript(transcript), readalong.BuildReview(chapters, nil)
 			}
 		}
 	}
-	return readalong.FromTranscript(transcript)
+	return readalong.FromTranscript(transcript), nil
 }
 
 // contentFor loads and aligns the EPUB, reusing a cached alignment when the
 // transcript, ebook text and configuration are unchanged. It never starts a
-// new transcription.
+// new transcription. The review is built from the book's own text, so it
+// survives a fallback to the transcript.
 func (a *App) contentFor(
 	ctx context.Context,
 	book library.Book,
 	transcript *transcribe.Transcript,
 	report func(transcribe.Progress),
-) *readalong.Content {
+) (*readalong.Content, *readalong.Review) {
 	if book.EPUBPath == "" {
-		return readalong.FromTranscript(transcript)
+		return readalong.FromTranscript(transcript), nil
 	}
 	if err := ctx.Err(); err != nil {
-		return nil
+		return nil, nil
 	}
 
 	report(transcribe.Progress{Stage: "Reading the EPUB…", Fraction: 0})
 	document, err := epub.Open(book.EPUBPath)
 	if err != nil {
-		return readalong.FromTranscript(transcript)
+		return readalong.FromTranscript(transcript), nil
 	}
 	chapters, err := document.Chapters()
 	if err != nil {
-		return readalong.FromTranscript(transcript)
+		return readalong.FromTranscript(transcript), nil
 	}
 
 	config := align.DefaultConfig()
@@ -249,10 +269,11 @@ func (a *App) contentFor(
 	if err := a.cache.ReadJSON(cachePath, &cached); err == nil &&
 		cached.Key == key && cached.Version == readalong.AlignmentVersion {
 		if content, buildErr := readalong.FromEPUBWithAlignment(chapters, transcript, &cached); buildErr == nil {
+			review := readalong.BuildReview(chapters, &cached)
 			if !content.Synced {
-				return readalong.FromTranscript(transcript)
+				return readalong.FromTranscript(transcript), review
 			}
-			return content
+			return content, review
 		}
 	}
 
@@ -262,19 +283,20 @@ func (a *App) contentFor(
 	})
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil
+			return nil, nil
 		}
-		return readalong.FromTranscript(transcript)
+		return readalong.FromTranscript(transcript), readalong.BuildReview(chapters, nil)
 	}
 
 	// A cache failure must not stop the book from opening.
 	_ = a.cache.WriteJSON(cachePath, alignment)
 
 	content, err := readalong.BuildContent(chapters, transcript, alignment)
+	review := readalong.BuildReview(chapters, alignment)
 	if err != nil || !content.Synced {
-		return readalong.FromTranscript(transcript)
+		return readalong.FromTranscript(transcript), review
 	}
-	return content
+	return content, review
 }
 
 // closeSession stops the reader and optionally saves its place.

@@ -67,3 +67,25 @@ func TestNewCreatesRoot(t *testing.T) {
 		t.Fatalf("New() did not create the cache directory: %v", err)
 	}
 }
+
+func TestRemove(t *testing.T) {
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	filename := store.File("nested", "record.json")
+	if err := store.WriteJSON(filename, record{Name: "book"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Remove(filename); err != nil {
+		t.Fatalf("Remove() = %v", err)
+	}
+	if _, err := os.Stat(filename); !os.IsNotExist(err) {
+		t.Fatalf("Remove() left the file: %v", err)
+	}
+	// Removing a file that is already gone is not an error.
+	if err := store.Remove(filename); err != nil {
+		t.Fatalf("Remove() of a missing file = %v", err)
+	}
+}

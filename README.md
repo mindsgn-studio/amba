@@ -14,10 +14,30 @@ It is built with [mygo](https://github.com/egoist/mygo) and Go.
    in each one. Selecting a book opens it.
 3. **Read along** — the book's text, the word currently being read, playback
    controls, a progress bar, chapter navigation, playback speed and a
-   *Follow* switch that keeps the active paragraph in view.
+   *Follow* switch that keeps the active paragraph in view. When an EPUB is
+   attached, **Show ebook** opens a drawer beside the reader with the printed
+   book, page by page.
 
 Progress (position, duration and speed) is saved per book and restored the
 next time the book is opened.
+
+## The ebook drawer
+
+The drawer is for checking how much of the printed book the narration actually
+reads. Each word is coloured by its place in the audiobook:
+
+- **green** — the word is matched to the narration and the reader highlights it;
+- **red** — the word has no reliable match;
+- punctuation-only tokens stay muted, because they carry no narration.
+
+Pages turn with **Previous page** and **Next page**, and the drawer opens at
+the chapter being heard. A rejected chapter is still shown for inspection, but
+its words are red because the reader falls back to the transcript there.
+
+**Remove EPUB** detaches the book without touching the audiobook, the player or
+your progress. An EPUB imported from elsewhere is forgotten. An EPUB that sits
+beside the audiobook is never deleted: Amba records that you removed it, so the
+next scan leaves it detached. Importing an EPUB again clears that record.
 
 ## Getting started
 
@@ -108,7 +128,8 @@ formula and limitations.
 
 - `os.UserCacheDir()/Amba` — transcripts (`books/<id>/transcript.json`),
   alignment results (`books/<id>/alignment.json`), imported EPUB paths
-  (`books/<id>/epub-import.json`) and listening progress
+  (`books/<id>/epub-import.json`), removed EPUB records
+  (`books/<id>/epub-removed.json`) and listening progress
   (`progress/<id>.json`). On macOS that is `~/Library/Caches/Amba`.
 - `models/sherpa-onnx-whisper-tiny.en` — the speech model, installed from the
   official sherpa-onnx release when it is not present.
@@ -122,13 +143,13 @@ and starts it. Everything else lives in `internal/`:
 
 | Package | Responsibility |
 | --- | --- |
-| `app` | Screens, routing, background preparation, reader state and progress saving. Playback is an interface, so the reader can be tested without audio hardware. |
+| `app` | Screens, routing, background preparation, reader state, the ebook drawer and progress saving. Playback is an interface, so the reader can be tested without audio hardware. |
 | `library` | Finds books on disk, reads EPUB metadata and stores per-book progress. |
 | `epub` | Reads EPUB metadata, cover, table of contents, reading order, sentences, words, offsets and plain text with the standard library and `x/net/html`. |
 | `transcribe` | Whisper transcription, model installation, audio conversion and the transcript cache. |
 | `media` | Audio durations via `ffprobe`. |
 | `player` | Plays a list of files as one timeline, with position, seeking, speed and track advance. |
-| `readalong` | Builds timed content, evaluates chapter acceptance, persists alignment results and falls back to the transcript. |
+| `readalong` | Builds timed content, evaluates chapter acceptance, persists alignment results, lays the printed book out for the drawer and falls back to the transcript. |
 | `align` | Fuzzy monotonic alignment with multi-size anchors, word similarity, confidence scoring and local alignment. |
 | `textutil` | Word normalisation shared by alignment and display. |
 | `store` | Atomic JSON cache files. |

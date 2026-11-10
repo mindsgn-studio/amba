@@ -4,6 +4,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,4 +68,14 @@ func (s *Store) WriteJSON(filename string, value any) error {
 		return err
 	}
 	return os.Rename(temporaryName, filename)
+}
+
+// Remove deletes a file from the store. A missing file is not an error, so
+// callers can remove an optional record without checking for it first.
+func (s *Store) Remove(filename string) error {
+	err := os.Remove(filename)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }

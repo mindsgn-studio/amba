@@ -108,6 +108,21 @@ func TestScanRejectsBadRoot(t *testing.T) {
 	}
 }
 
+func TestTitleFor(t *testing.T) {
+	tests := map[string]string{
+		"/books/Book One": "Book One",
+		"/books/book_two": "Book Two",
+		"/books/Part-01":  "Part 01",
+		"/books/":         "Books",
+		"/books/...":      "Untitled",
+	}
+	for directory, want := range tests {
+		if got := TitleFor(directory); got != want {
+			t.Errorf("TitleFor(%q) = %q, want %q", directory, got, want)
+		}
+	}
+}
+
 func TestNaturalLess(t *testing.T) {
 	tests := []struct {
 		left  string

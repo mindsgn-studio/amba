@@ -32,13 +32,25 @@ func (a *App) readerView(c *ui.Context, id string) {
 		ui.Divider(c)
 		switch a.reader.status {
 		case readerReady:
-			a.readerBody(c)
-			a.readerFooter(c)
+			ui.Row(c).Grow(1).Children(func() {
+				if a.reader.drawerOpen && a.reader.session != nil && a.reader.session.review != nil {
+					a.reviewDrawer(c)
+					ui.Divider(c)
+				}
+				ui.Column(c).Grow(1).Children(func() {
+					a.readerBody(c)
+					a.readerFooter(c)
+				})
+			})
 		case readerError:
 			a.readerErrorView(c)
 		default:
 			a.readerLoadingView(c)
 		}
+	})
+
+	ui.Modal(c, &a.reader.confirmRemove, func() {
+		a.confirmRemoveView(c)
 	})
 }
 
@@ -63,6 +75,15 @@ func (a *App) readerHeader(c *ui.Context) {
 			if reader.session.book.EPUBPath == "" {
 				if ui.Button(c, "Import EPUB").Clicked() {
 					a.importEPUB(reader.book.ID)
+				}
+			}
+			if reader.session.review != nil {
+				label := "Show ebook"
+				if reader.drawerOpen {
+					label = "Hide ebook"
+				}
+				if ui.Button(c, label).Clicked() {
+					a.toggleReview()
 				}
 			}
 			if ui.Button(c, "Previous").Disabled(reader.chapter <= 0).Clicked() {
@@ -201,6 +222,10 @@ func (a *App) readerBody(c *ui.Context) {
 			ui.Text(c, reader.importErr.Error()).
 				FontSize(12).TextColor(theme.Danger).TextAlign(ui.Center).MaxWidth(620).Padding(24, 0)
 		}
+		if reader.removeErr != nil {
+			ui.Text(c, reader.removeErr.Error()).
+				FontSize(12).TextColor(theme.Danger).TextAlign(ui.Center).MaxWidth(620).Padding(24, 0)
+		}
 		ui.List(c, &reader.list, len(paragraphs), func(row int) {
 			a.paragraphRow(c, row, activeRef)
 		}).Grow(1).WidthPercent(100).MaxWidth(760).Padding(24, 0)
@@ -317,5 +342,27 @@ func (a *App) readerFooter(c *ui.Context) {
 		if reader.playbackErr != nil {
 			ui.Text(c, reader.playbackErr.Error()).FontSize(12).TextColor(theme.Danger)
 		}
+	})
+}
+
+// confirmRemoveView asks before detaching the attached ebook. The audiobook
+// and the listener's place in it are untouched.
+func (a *App) confirmRemoveView(c *ui.Context) {
+	theme := c.Theme()
+	ui.Column(c).Width(420).Gap(12).Children(func() {
+		ui.Text(c, "Remove the ebook?").FontSize(18).Bold()
+		ui.Text(c, "The audiobook and your place in it stay. You can import the EPUB again later.").
+			FontSize(13).TextColor(theme.TextMuted)
+		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+			if ui.Button(c, "Cancel").Clicked() {
+				a.reader.confirmRemove = false
+			}
+			if ui.PrimaryButton(c, "Remove ebook").Clicked() {
+				a.reader.confirmRemove = false
+				if err := a.removeEPUB(a.reader.bookID); err != nil {
+					a.reader.removeErr = err
+				}
+			}
+		})
 	})
 }

@@ -186,7 +186,7 @@ func (a *App) refresh(initial bool) {
 
 	go func() {
 		books, err := library.Scan(a.config.LibraryRoot)
-		books = a.applyImports(books)
+		books = a.applyAttachments(books)
 		a.Update(func() {
 			a.books = books
 			a.booksErr = err

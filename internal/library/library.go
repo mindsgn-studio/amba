@@ -178,7 +178,7 @@ func Scan(root string) ([]Book, error) {
 
 		book := Book{
 			ID:         bookID(relative),
-			Title:      humanize(filepath.Base(directory)),
+			Title:      TitleFor(directory),
 			Directory:  directory,
 			AudioFiles: item.audio,
 		}
@@ -210,6 +210,12 @@ func Scan(root string) ([]Book, error) {
 func bookID(relative string) string {
 	sum := sha256.Sum256([]byte(filepath.ToSlash(relative)))
 	return hex.EncodeToString(sum[:12])
+}
+
+// TitleFor derives a book's title from its audiobook folder, for a book with
+// no EPUB metadata or after its EPUB is removed.
+func TitleFor(directory string) string {
+	return humanize(filepath.Base(directory))
 }
 
 // humanize turns a folder name into a title.

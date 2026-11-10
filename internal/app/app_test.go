@@ -69,8 +69,8 @@ func newTestApp(t *testing.T) *App {
 	return application
 }
 
-func testContent() *readalong.Content {
-	transcript := &transcribe.Transcript{
+func testTranscript() *transcribe.Transcript {
+	return &transcribe.Transcript{
 		Files: []transcribe.File{
 			{Path: "one.mp3", Start: 0, Duration: 10 * time.Second},
 			{Path: "two.mp3", Start: 10 * time.Second, Duration: 10 * time.Second},
@@ -83,7 +83,39 @@ func testContent() *readalong.Content {
 		},
 		Duration: 20 * time.Second,
 	}
-	return readalong.FromTranscript(transcript)
+}
+
+func testContent() *readalong.Content {
+	return readalong.FromTranscript(testTranscript())
+}
+
+func testReview() *readalong.Review {
+	return &readalong.Review{
+		Pages: []readalong.ReviewPage{
+			{
+				Chapter:  0,
+				Title:    "Part 1",
+				Accepted: true,
+				Paragraphs: []readalong.ReviewParagraph{{
+					Words: []readalong.ReviewWord{
+						{Text: "Call", Synced: true, Word: true},
+						{Text: "me", Synced: true, Word: true},
+						{Text: "Ishmael.", Synced: false, Word: true},
+					},
+				}},
+			},
+			{
+				Chapter:  1,
+				Title:    "Part 2",
+				Accepted: false,
+				Paragraphs: []readalong.ReviewParagraph{{
+					Words: []readalong.ReviewWord{{Text: "Three", Synced: false, Word: true}},
+				}},
+			},
+		},
+		Synced: 2,
+		Total:  4,
+	}
 }
 
 func readyReader(application *App, book library.Book, playback Playback) {
@@ -93,10 +125,11 @@ func readyReader(application *App, book library.Book, playback Playback) {
 	application.reader.bookID = book.ID
 	application.reader.status = readerReady
 	application.reader.session = &session{
-		book:     book,
-		content:  testContent(),
-		playback: playback,
-		duration: 20 * time.Second,
+		book:       book,
+		content:    testContent(),
+		transcript: testTranscript(),
+		playback:   playback,
+		duration:   20 * time.Second,
 	}
 }
 
@@ -267,18 +300,24 @@ func TestContentForFallsBackToTranscript(t *testing.T) {
 		Duration: time.Second,
 	}
 
-	content := contentFor(context.Background(), library.Book{}, transcript)
+	content, review := contentFor(context.Background(), library.Book{}, transcript)
 	if content == nil {
 		t.Fatal("contentFor() = nil")
 	}
 	if content.Synced {
 		t.Error("contentFor() trusted transcript-only content")
 	}
+	if review != nil {
+		t.Error("contentFor() built a review without an ebook")
+	}
 
 	// A missing EPUB falls back the same way.
-	content = contentFor(context.Background(), library.Book{EPUBPath: filepath.Join(t.TempDir(), "missing.epub")}, transcript)
+	content, review = contentFor(context.Background(), library.Book{EPUBPath: filepath.Join(t.TempDir(), "missing.epub")}, transcript)
 	if content == nil || content.Synced {
 		t.Errorf("contentFor() with a missing EPUB = %+v, want transcript-only content", content)
+	}
+	if review != nil {
+		t.Error("contentFor() built a review for a missing EPUB")
 	}
 }
 
@@ -293,7 +332,7 @@ func TestContentForUsesMatchingEPUB(t *testing.T) {
 		Duration: 1500 * time.Millisecond,
 	}
 
-	content := contentFor(context.Background(), library.Book{EPUBPath: epubPath}, transcript)
+	content, review := contentFor(context.Background(), library.Book{EPUBPath: epubPath}, transcript)
 	if content == nil {
 		t.Fatal("contentFor() = nil")
 	}
@@ -302,6 +341,12 @@ func TestContentForUsesMatchingEPUB(t *testing.T) {
 	}
 	if content.Chapters[0].Title != "Chapter One" {
 		t.Errorf("chapter title = %q, want %q", content.Chapters[0].Title, "Chapter One")
+	}
+	if review == nil {
+		t.Fatal("contentFor() built no review for the matching EPUB")
+	}
+	if review.Total != 3 || review.Synced != 3 {
+		t.Errorf("review = %d of %d synced, want 3 of 3", review.Synced, review.Total)
 	}
 }
 
@@ -434,9 +479,12 @@ func TestContentForCachesAlignmentAndInvalidatesOnChanges(t *testing.T) {
 	}
 	report := func(transcribe.Progress) {}
 
-	content := application.contentFor(context.Background(), book, transcript, report)
+	content, review := application.contentFor(context.Background(), book, transcript, report)
 	if content == nil || !content.Synced {
 		t.Fatalf("contentFor() = %+v, want synced content", content)
+	}
+	if review == nil || review.Total == 0 {
+		t.Fatal("contentFor() built no review")
 	}
 
 	cachePath := application.cache.File("books", book.ID, "alignment.json")
@@ -452,7 +500,7 @@ func TestContentForCachesAlignmentAndInvalidatesOnChanges(t *testing.T) {
 	}
 
 	// The same inputs use the cache and keep the same key.
-	content = application.contentFor(context.Background(), book, transcript, report)
+	content, _ = application.contentFor(context.Background(), book, transcript, report)
 	if content == nil || !content.Synced {
 		t.Fatal("contentFor() failed on the cached path")
 	}
@@ -470,7 +518,7 @@ func TestContentForCachesAlignmentAndInvalidatesOnChanges(t *testing.T) {
 		Duration: transcript.Duration,
 	}
 	changed.Words[1].Text = "dog"
-	_ = application.contentFor(context.Background(), book, changed, report)
+	_, _ = application.contentFor(context.Background(), book, changed, report)
 	var second readalong.Alignment
 	if err := application.cache.ReadJSON(cachePath, &second); err != nil {
 		t.Fatal(err)
@@ -499,9 +547,16 @@ func TestAttachEPUBPersistsImport(t *testing.T) {
 
 	// A fresh scan reattaches the imported EPUB from the cache.
 	scanned := []library.Book{{ID: book.ID, Title: "Book"}}
-	scanned = application.applyImports(scanned)
+	scanned = application.applyAttachments(scanned)
 	if scanned[0].EPUBPath != epubPath {
-		t.Errorf("applyImports() EPUBPath = %q, want %q", scanned[0].EPUBPath, epubPath)
+		t.Errorf("applyAttachments() EPUBPath = %q, want %q", scanned[0].EPUBPath, epubPath)
+	}
+
+	// An explicit import wins over an EPUB found beside the audiobook.
+	scanned = []library.Book{{ID: book.ID, Title: "Book", EPUBPath: filepath.Join(t.TempDir(), "other.epub")}}
+	scanned = application.applyAttachments(scanned)
+	if scanned[0].EPUBPath != epubPath {
+		t.Errorf("applyAttachments() EPUBPath = %q, want the imported %q", scanned[0].EPUBPath, epubPath)
 	}
 }
 
@@ -519,7 +574,7 @@ func TestContentForFallsBackToTranscriptWhenEPUBDoesNotMatch(t *testing.T) {
 		Duration: 2500 * time.Millisecond,
 	}
 
-	content := application.contentFor(context.Background(), book, transcript, func(transcribe.Progress) {})
+	content, review := application.contentFor(context.Background(), book, transcript, func(transcribe.Progress) {})
 	if content == nil {
 		t.Fatal("contentFor() returned nil")
 	}
@@ -530,5 +585,254 @@ func TestContentForFallsBackToTranscriptWhenEPUBDoesNotMatch(t *testing.T) {
 		if chapter.Source != "transcript" {
 			t.Errorf("chapter source = %q, want transcript fallback", chapter.Source)
 		}
+	}
+	if review == nil {
+		t.Fatal("contentFor() built no review for the unrelated EPUB")
+	}
+	if review.Total == 0 || review.Synced != 0 {
+		t.Errorf("review = %d of %d synced, want unsynced printed text", review.Synced, review.Total)
+	}
+}
+
+func TestReaderEbookDrawer(t *testing.T) {
+	application := newTestApp(t)
+	book := library.Book{ID: "book", Title: "Neuromancer", EPUBPath: "book.epub"}
+	playback := &fakePlayback{duration: 20 * time.Second}
+	readyReader(application, book, playback)
+	application.reader.session.review = testReview()
+	application.router.Replace("/read/book")
+
+	tester := ui.NewTester(application.View, 1200, 800)
+	tester.Frame()
+
+	if !tester.HasText("Show ebook") {
+		t.Fatalf("reader does not offer the ebook drawer: %q", tester.Texts())
+	}
+	if err := tester.Click("Show ebook"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+
+	for _, want := range []string{"Ebook", "● Synced", "● Unsynced", "Part 1", "Page 1 of 2", "Remove EPUB", "50% synced"} {
+		if !tester.HasText(want) {
+			t.Errorf("drawer does not show %q: %q", want, tester.Texts())
+		}
+	}
+
+	if err := tester.Click("Next page"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if !tester.HasText("Page 2 of 2") || !tester.HasText("Part 2") {
+		t.Errorf("drawer did not turn to page 2: %q", tester.Texts())
+	}
+	if !tester.HasText("This chapter falls back") {
+		t.Error("drawer does not explain a rejected chapter")
+	}
+
+	if err := tester.Click("Hide"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if tester.HasText("Remove EPUB") {
+		t.Errorf("drawer stayed open after Hide: %q", tester.Texts())
+	}
+}
+
+func TestReviewSpansColorsSyncState(t *testing.T) {
+	theme := ui.LightTheme()
+	paragraph := readalong.ReviewParagraph{Words: []readalong.ReviewWord{
+		{Text: "Synced", Synced: true, Word: true},
+		{Text: "unsynced", Word: true},
+		{Text: "—"},
+	}}
+
+	spans := reviewSpans(paragraph, theme)
+	if len(spans) != 3 {
+		t.Fatalf("spans = %d, want 3", len(spans))
+	}
+	if spans[0].Color != theme.Success || spans[0].Text != "Synced " {
+		t.Errorf("synced span = %+v, want green and a trailing space", spans[0])
+	}
+	if spans[1].Color != theme.Danger || spans[1].Text != "unsynced " {
+		t.Errorf("unsynced span = %+v, want red and a trailing space", spans[1])
+	}
+	if spans[2].Color != theme.TextMuted || spans[2].Text != "—" {
+		t.Errorf("punctuation span = %+v, want muted and no trailing space", spans[2])
+	}
+}
+
+func TestRemoveEPUBRemembersFolderBook(t *testing.T) {
+	application := newTestApp(t)
+	directory := t.TempDir()
+	epubPath := filepath.Join(directory, "book.epub")
+	if err := os.WriteFile(epubPath, []byte("epub"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	book := library.Book{
+		ID:        "book",
+		Title:     "Test Book",
+		Author:    "An Author",
+		Directory: directory,
+		EPUBPath:  epubPath,
+		Cover:     []byte("cover"),
+	}
+	playback := &fakePlayback{duration: 20 * time.Second}
+	readyReader(application, book, playback)
+	application.reader.session.review = testReview()
+	application.reader.drawerOpen = true
+
+	if err := application.removeEPUB(book.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	updated := application.books[0]
+	if updated.EPUBPath != "" {
+		t.Errorf("EPUBPath = %q, want none", updated.EPUBPath)
+	}
+	if updated.Title != library.TitleFor(directory) {
+		t.Errorf("Title = %q, want the folder title %q", updated.Title, library.TitleFor(directory))
+	}
+	if updated.Author != "" || updated.Cover != nil {
+		t.Errorf("removed ebook metadata survived: %+v", updated)
+	}
+
+	var record epubRemoval
+	if err := application.cache.ReadJSON(application.removalPath(book.ID), &record); err != nil {
+		t.Fatalf("removal was not recorded: %v", err)
+	}
+	if record.Path != epubPath {
+		t.Errorf("removal path = %q, want %q", record.Path, epubPath)
+	}
+
+	// The open book falls back to the transcript in place, without closing
+	// the player or transcribing again.
+	if application.reader.session == nil {
+		t.Fatal("removeEPUB() closed the session")
+	}
+	if application.reader.session.review != nil {
+		t.Error("removeEPUB() kept the review")
+	}
+	if application.reader.session.content == nil || application.reader.session.content.Synced {
+		t.Error("removeEPUB() did not fall back to the transcript")
+	}
+	if application.reader.drawerOpen {
+		t.Error("removeEPUB() left the drawer open")
+	}
+	if playback.closed {
+		t.Error("removeEPUB() closed the player")
+	}
+
+	// A later scan finds the file again; the removal record keeps it out.
+	scanned := []library.Book{{
+		ID:        book.ID,
+		Title:     "Test Book",
+		Author:    "An Author",
+		Directory: directory,
+		EPUBPath:  epubPath,
+		Cover:     []byte("cover"),
+	}}
+	scanned = application.applyAttachments(scanned)
+	if scanned[0].EPUBPath != "" {
+		t.Errorf("applyAttachments() reattached the removed EPUB: %q", scanned[0].EPUBPath)
+	}
+	if scanned[0].Title != library.TitleFor(directory) {
+		t.Errorf("applyAttachments() Title = %q, want the folder title", scanned[0].Title)
+	}
+}
+
+func TestRemoveEPUBForgetsImportedBook(t *testing.T) {
+	application := newTestApp(t)
+	directory := t.TempDir()
+	book := library.Book{ID: "book", Title: "Book", Directory: directory}
+	application.books = []library.Book{book}
+	application.reader.bookID = "other"
+
+	imported := writeTestEPUB(t)
+	if err := application.attachEPUB(book.ID, imported); err != nil {
+		t.Fatal(err)
+	}
+	if err := application.removeEPUB(book.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if application.books[0].EPUBPath != "" {
+		t.Errorf("EPUBPath = %q, want none", application.books[0].EPUBPath)
+	}
+	var record epubImport
+	if err := application.cache.ReadJSON(application.importPath(book.ID), &record); err == nil {
+		t.Errorf("import record survived removal: %+v", record)
+	}
+	var removal epubRemoval
+	if err := application.cache.ReadJSON(application.removalPath(book.ID), &removal); err == nil {
+		t.Errorf("an imported EPUB left a folder removal record: %+v", removal)
+	}
+
+	scanned := application.applyAttachments([]library.Book{{ID: book.ID, Directory: directory}})
+	if scanned[0].EPUBPath != "" {
+		t.Errorf("applyAttachments() reattached the removed import: %q", scanned[0].EPUBPath)
+	}
+}
+
+func TestRemoveEPUBFromDrawer(t *testing.T) {
+	application := newTestApp(t)
+	directory := t.TempDir()
+	epubPath := filepath.Join(directory, "book.epub")
+	if err := os.WriteFile(epubPath, []byte("epub"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	book := library.Book{ID: "book", Title: "Book", Directory: directory, EPUBPath: epubPath}
+	playback := &fakePlayback{duration: 20 * time.Second}
+	readyReader(application, book, playback)
+	application.reader.session.review = testReview()
+	application.router.Replace("/read/book")
+
+	tester := ui.NewTester(application.View, 1200, 800)
+	tester.Frame()
+	if err := tester.Click("Show ebook"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if err := tester.Click("Remove EPUB"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+
+	if !tester.HasText("Remove the ebook?") {
+		t.Fatalf("removal did not ask for confirmation: %q", tester.Texts())
+	}
+	if err := tester.Click("Cancel"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if application.books[0].EPUBPath == "" {
+		t.Fatal("Cancel removed the EPUB")
+	}
+	if !tester.HasText("Remove EPUB") {
+		t.Error("Cancel closed the drawer")
+	}
+
+	if err := tester.Click("Remove EPUB"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if err := tester.Click("Remove ebook"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+
+	if application.books[0].EPUBPath != "" {
+		t.Errorf("EPUBPath = %q, want none", application.books[0].EPUBPath)
+	}
+	if tester.HasText("Remove EPUB") {
+		t.Error("drawer stayed open after removal")
+	}
+	if !tester.HasText("Import EPUB") {
+		t.Error("reader does not offer to import an EPUB after removal")
+	}
+	if playback.closed {
+		t.Error("removing the ebook closed the player")
 	}
 }
